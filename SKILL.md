@@ -33,9 +33,9 @@ agent_created: true
 执行顺序：
 1. 读 `references/products.md` 取 SKU 卖点与定价。
 2. 用 `references/title_seo.md` 的"关键词词库"挑词，套 `assets/title_template.md` 结构。
-3. 对每个候选运行校验：
+3. 对每个候选运行校验（`SKILL_DIR` = 本 SKILL.md 所在目录的**绝对路径**，避免受当前工作目录影响）：
    ```bash
-   python3 scripts/check_title.py "候选标题"
+   python3 "$SKILL_DIR/scripts/check_title.py" "候选标题"
    ```
    零命中禁用词且字符数 ≤ 45 方可通过；否则按提示改词重跑。
 4. 输出候选标题 + 各自埋词说明（覆盖哪些搜索词）。
@@ -71,7 +71,7 @@ agent_created: true
 - `references/promo.md` — 推广投放工具与计划框架（含选词表/预算/否词/分时折扣/报表解读/投产底层逻辑）
 - `references/promo_roi_playbook.md` — 提高投产比实操手册（保本ROI/ROAS杠杆/智能出价坑/避坑/首月落地）
 - `references/review_activity_data.md` — 评价/活动/数据复盘（含指标公式与周月报模板）
-- `scripts/check_title.py` — 标题合规校验（禁用词+暗示疗效正则+字符数+品牌词）
+- `scripts/check_title.py` — 标题合规校验（禁用词+暗示疗效正则+字符数+品牌词）；调用时用 SKILL.md 所在目录的绝对路径
 - `assets/title_template.md` — 标题撰写模板
 - `assets/detail_page_template.md` — 详情页/主图结构模板
 - `examples/title_samples.md` — 三 SKU 标题成品（可直接复制）
