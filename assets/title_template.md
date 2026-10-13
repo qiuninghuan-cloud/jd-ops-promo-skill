@@ -1,3 +1,5 @@
+> 使用前按 references/products.md 核实商品事实，按 references/xiaohaohao_compliance.md 解释检查结果，按 SKILL.md 保留用户指定词。以下是历史结构示例，不代表当前售价、资质、效果或已完成的售后动作；脚本命中须复核，不能自动删除保留词。
+
 # 京东标题撰写模板（填入即用）
 
 > 用法：复制下方结构，按 SKU 填词，词块间用空格分隔。填完用 `scripts/check_title.py` 校验。
@@ -37,4 +39,5 @@
 周郎中 皮肤抑菌膏 30g 草本温和 外用洁净 家庭常备 随身便携 居家外出
 ```
 
-> 每个候选须过 `scripts/check_title.py`，零命中禁用词、汉字数 ≤ 30。
+> 每个候选须过 `scripts/check_title.py`，逐项复核命中、保留指定词，并按后台限制检查字符数。
+

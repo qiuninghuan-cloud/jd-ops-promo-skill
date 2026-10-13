@@ -1,48 +1,11 @@
 # jd-ops-promo
 
-京东运营与推广 Skill（周郎中消字号外用抑菌商品专属），面向 WorkBuddy / Claude Code 的 Skill 目录规范。
+用于 Codex / Claude 的京东运营与推广 Skill。能力包括后台数据读取、SKU选品、独立计划搭建、投产诊断及已授权操作，以及商品文案与活动运营。
 
-## 覆盖能力
+入口为 SKILL.md。浏览器操作依赖运行环境实际提供的工具和登录权限，安装 Skill 本身不会获得后台控制能力。
 
-| 模块 | 内容 |
-|---|---|
-| 标题与搜索优化 | 京东标题结构公式、关键词研究方法、按 SKU 词库、A/B 测试方法 |
-| 主图 / 详情页文案 | 五张主图画面+文案、详情页 10 模块结构 |
-| 推广投放 | 快车/海投/京速推/购物触点、3 层关键词矩阵、DMP 四层人群、否词、分时折扣 |
-| 提高投产 | 保本 ROI 测算、ROAS 四杠杆（CTR×CVR×AOV÷CPC）、智能出价避坑、周度诊断表 |
-| 评价 / 活动 / 数据 | 评价回复话术、问大家 Q&A、活动筹备清单、周月报模板 |
+Codex 目录：~/.codex/skills/jd-ops-promo；Claude 目录：~/.claude/skills/jd-ops-promo。
 
-## 合规约束（消字号）
+标题检查：`python scripts/check_title.py "候选标题" --json`。默认45字符为本地建议；命中只用于风险复核，用户指定保留词按 SKILL.md 执行，脚本通过不等于平台批准。
 
-禁用词：治疗 / 消炎 / 抗菌 / 杀菌 / 湿疹 / 修护 / 舒缓 / 预防 / 最 / 一抹就好 等
-可用词：抑菌 / 清洁 / 护理 / 草本 / 植物配方 / 紫草 / 温和 / 外用 / 家庭常备
-
-标题上限 45 字符（约 30 汉字），品牌词前置。
-
-## 安装
-
-```bash
-cp -r jd-ops-promo ~/.workbuddy/skills/
-# 或 Claude Code
-cp -r jd-ops-promo ~/.claude/skills/
-```
-
-## 用法
-
-```bash
-python3 scripts/check_title.py "周郎中紫草皮肤抑菌膏30g草本植物配方外用抑菌家庭常备"
-```
-
-零命中禁用词 + 字符数达标 + 品牌词存在 → 通过。
-
-## 目录
-
-```
-SKILL.md                          入口与执行顺序
-references/                       合规词库、SKU卖点、SEO、投放、投产手册、评价活动数据
-scripts/check_title.py            标题合规校验脚本
-assets/                           标题模板、详情页模板
-examples/                         标题/推广计划/投产诊断/评价话术/详情页 成品
-```
-
-> 私有仓库：含品牌与运营数据，请勿公开分发。
+指标与成本公式见 references/promo_roi_playbook.md；操作授权和恢复见 references/live_backend.md；推广方案和诊断表见 examples/。
