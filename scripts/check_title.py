@@ -5,7 +5,7 @@
 
 功能：
   1. 检测标题中的禁用词（医疗功效、炎症/杀菌越界、病种词、修护舒缓、绝对化用语等）
-  2. 统计标题总字符数，判断是否超过建议上限（默认 45 字符，京东标题建议上限）
+  2. 统计汉字字符数，判断是否超过建议上限（默认 45 字符，京东标题建议上限）
   3. 检查品牌词「周郎中」是否出现
   4. 输出文本报告或 JSON（--json），供 skill 与 CI 调用
 
@@ -44,7 +44,7 @@ BANNED_WORDS = [
 # 品牌词（建议前置出现）
 BRAND = "周郎中"
 
-# 建议字符上限（京东标题约 30-45 字符）
+# 建议字符上限（京东标题约 30-45 汉字，按 45 字符计）
 DEFAULT_MAX_HAN = 45
 
 # 暗示疗效的正则（即使不含上表精确词，命中以下模式也算违规）
@@ -56,9 +56,8 @@ IMPLICATION_PATTERNS = [
 ]
 
 
-def count_chars(text: str) -> int:
-    """Count user-visible characters, ignoring no characters in the title."""
-    return len(text)
+def count_han(text: str) -> int:
+    return len(re.findall(r"[一-鿿]", text))
 
 
 def check_title(title: str, max_han: int = DEFAULT_MAX_HAN):
@@ -69,8 +68,8 @@ def check_title(title: str, max_han: int = DEFAULT_MAX_HAN):
             idx = title.find(w)
             hits.append({"word": w, "pos": idx})
 
-    char_count = count_chars(title)
-    over = char_count > max_han
+    han = count_han(title)
+    over = han > max_han
     has_brand = BRAND in title
 
     # 暗示疗效正则检测
@@ -86,7 +85,7 @@ def check_title(title: str, max_han: int = DEFAULT_MAX_HAN):
     for ih in implication_hits:
         problems.append(f"暗示疗效风险「{ih['match']}」（{ih['pattern']}）@第{ih['pos']+1}字")
     if over:
-        problems.append(f"字符数 {char_count} 超过建议上限 {max_han}")
+        problems.append(f"汉字数 {han} 超过建议上限 {max_han}")
     if not has_brand:
         problems.append(f"未包含品牌词「{BRAND}」")
 
@@ -94,9 +93,7 @@ def check_title(title: str, max_han: int = DEFAULT_MAX_HAN):
     return {
         "title": title,
         "passed": passed,
-        "char_count": char_count,
-        # Keep the legacy key for callers that consumed earlier JSON output.
-        "han_count": char_count,
+        "han_count": han,
         "max_han": max_han,
         "has_brand": has_brand,
         "banned_hits": hits,
@@ -106,9 +103,6 @@ def check_title(title: str, max_han: int = DEFAULT_MAX_HAN):
 
 
 def main():
-    # Keep CLI output usable in Windows consoles that default to GBK.
-    if hasattr(sys.stdout, "reconfigure"):
-        sys.stdout.reconfigure(encoding="utf-8")
     ap = argparse.ArgumentParser(description="京东消字号标题合规校验")
     ap.add_argument("title", help="待校验标题；或用 - 从 stdin 读取")
     ap.add_argument("--json", action="store_true", help="输出 JSON")
@@ -130,7 +124,7 @@ def main():
         print(json.dumps(result, ensure_ascii=False, indent=2))
     else:
         print(f"标题：{result['title']}")
-        print(f"字符数：{result['char_count']} / 建议≤{result['max_han']}")
+        print(f"汉字数：{result['han_count']} / 建议≤{result['max_han']}")
         print(f"含品牌词：{'是' if result['has_brand'] else '否'}")
         if result["banned_hits"]:
             print("禁用词命中：")

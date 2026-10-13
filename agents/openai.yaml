@@ -1,0 +1,14 @@
+interface:
+  display_name: "京东运营推广（周郎中）"
+  short_description: "京东标题/主图详情/快车投放/评价数据，含消字号合规校验"
+  icon_small: "./assets/icon-small.svg"
+  brand_color: "#C8161D"
+  default_prompt: "用 jd-ops-promo 帮我处理京东运营任务"
+
+policy:
+  # 装了很多 skill 时隐式匹配容易被描述截断影响，这里允许隐式调用；
+  # 若发现误触发，改成 false，之后只能用 $jd-ops-promo 显式调用
+  allow_implicit_invocation: true
+
+dependencies:
+  tools: []
