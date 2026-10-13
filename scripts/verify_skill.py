@@ -27,6 +27,7 @@ SKILL_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 REQUIRED_FILES = [
     "SKILL.md",
     "references/xiaohaohao_compliance.md",
+    "references/account_context.md",
     "references/evidence_gate.md",
     "references/products.md",
     "references/title_seo.md",

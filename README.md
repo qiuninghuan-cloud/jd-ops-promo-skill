@@ -58,7 +58,7 @@ python3 <skill目录>/scripts/verify_skill.py
 
 ```
 SKILL.md                          入口：执行模式、安全边界、证据账本、质量门、四大模块
-references/                       合规词库、证据与质量门、SKU卖点、SEO、投放、投产手册、评价活动数据
+references/                       合规词库、店铺现状快照、证据与质量门、SKU卖点、SEO、投放、投产手册、评价活动数据
 scripts/check_title.py            标题合规校验
 scripts/verify_skill.py           发布前自检
 assets/                           标题模板、详情页模板、图标

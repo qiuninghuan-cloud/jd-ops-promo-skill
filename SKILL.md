@@ -82,7 +82,7 @@ agent_created: true
 
 ## 模块一：标题与搜索优化
 
-1. 读 `references/products.md` 取 SKU 卖点与定价。
+1. 读 `references/account_context.md` 确认商品在售状态与实际到手价，再读 `references/products.md` 取 SKU 卖点与定价。
 2. 用 `references/title_seo.md` 的关键词词库挑词，套 `assets/title_template.md` 结构。
 3. 对每个候选运行校验：
    ```bash
@@ -111,7 +111,7 @@ agent_created: true
 
 ## 模块三：推广投放（重点：提高投产比）
 
-1. 读 `references/promo.md`（工具矩阵、快车 3 层关键词矩阵、DMP 四层人群、否词、分时折扣、止损）。
+1. 读 `references/account_context.md` 取账户与商品现状（在售结构、到手价、已知问题），再读 `references/promo.md`（工具矩阵、快车 3 层关键词矩阵、DMP 四层人群、否词、分时折扣、止损）。
 2. 读 `references/promo_roi_playbook.md`（保本 ROI=1/毛利率、ROAS 四杠杆 CTR×CVR×AOV÷CPC、智能出价坑、避坑清单）。
 3. 按用户目标（拉新/冲量/收割/提投产）产出：工具组合 + 3 层选词表 + 保本 ROI 测算 + DMP 分层 + 否词 + 分时折扣 + 7 日节奏 + 止损动作。
 4. **CPC–客单价匹配检查（必做）**：投产上限 = 客单价 × 转化率 ÷ CPC。若某主推品该值 < 1，必须在方案里明确写"此品在当前 CPC 下必亏，需压价或换主推品"。
@@ -132,8 +132,9 @@ agent_created: true
 
 **references（每次开工按需读）**
 - `xiaohaohao_compliance.md` — 消字号合规词规范（必读）
+- `account_context.md` — 店铺现状快照：在售商品+前台到手价+推广结构+已知问题+数据缺口（**诊断/投放任务先读这里**）
 - `evidence_gate.md` — 证据账本 + 质量门判定 + 置信度规则（诊断/大产出前读）
-- `products.md` — 周郎中 SKU 卖点与定价
+- `products.md` — 周郎中 SKU 卖点与定价（规范口径；实际在售规格以 account_context 为准）
 - `title_seo.md` — 标题 SEO 规则、关键词研究方法、按 SKU 词库
 - `promo.md` — 推广投放工具与计划框架
 - `promo_roi_playbook.md` — 提高投产比实操手册
