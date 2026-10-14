@@ -37,6 +37,7 @@ REQUIRED_FILES = [
     "references/promo_roi_playbook.md",
     "references/review_ops.md",
     "references/review_activity_data.md",
+    "references/read_backend.md",
     "scripts/check_title.py",
     "scripts/verify_skill.py",
     "assets/title_template.md",

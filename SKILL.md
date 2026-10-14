@@ -118,6 +118,7 @@ agent_created: true
 
 ## 模块三：推广投放（京东**所有**推广工具）
 
+0. **需要后台真实数据时**（花费/计划/SKU 归因/在售清单），先读 `references/read_backend.md`——京准通/京麦实读完整 SOP（环境搭建、指纹防拦、京麦扫码登录、hash 路由 tab 绕法、抓表方法、已知死路）。实读只做只读抓取，投放操作由用户手动执行。
 1. 读 `references/account_context.md` 取账户与商品现状，再读 **`references/promo_tools.md`**（京东全推广工具体系：八大流量场）选定工具组合——**不要只盯快车**。
 2. 快车细节（3 层关键词矩阵、冷启动、权重阈值、海投/京速推/触点参数、DMP、否词、分时折扣）读 `references/promo.md`；投产方法论读 `references/promo_roi_playbook.md`。
 3. **按流量场选工具**（`promo_tools.md` 第十一节）：
@@ -182,9 +183,10 @@ agent_created: true
 - `promo_roi_playbook.md` — 提高投产比实操手册
 - `review_ops.md` — **评价运营体系**（四维目标、合规邀评、差评 SOP、问大家、监控指标）
 - `review_activity_data.md` — 评价话术 + 问大家 + 大促作战 + 数据复盘
+- `read_backend.md` — **京准通/京麦后台实读 SOP**（环境坑、指纹防拦、扫码登录、hash 路由绕法、只读抓取）
 
 **scripts**
-- `check_title.py` — 标题合规校验（禁用词 + 暗示疗效正则 + 字符数 + 品牌词）
+- `check_title.py` — 标题合规校验（禁用词 + 暗示疗效正则 + 字符数 + 品牌词；支持批量：多参数 / `--file` / stdin）
 - `verify_skill.py` — 发布前自检（frontmatter、目录完整性、敏感信息扫描）
 
 **assets / examples**

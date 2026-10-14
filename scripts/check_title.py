@@ -11,11 +11,13 @@
 
 用法：
   python3 check_title.py "周郎中 紫草皮肤抑菌膏 30g 草本植物配方 外用抑菌"
+  python3 check_title.py "标题A" "标题B" "标题C"          # 批量校验多个
+  python3 check_title.py --file titles.txt                # 从文件读（每行一个，# 开头忽略）
   echo "标题" | python3 check_title.py -
   python3 check_title.py "..." --json
   python3 check_title.py "..." --max 30
 
-退出码：0 = 通过；1 = 存在禁用词或超长；2 = 参数错误
+退出码：0 = 全部通过；1 = 存在禁用词或超长；2 = 参数错误
 """
 
 import argparse
@@ -102,46 +104,87 @@ def check_title(title: str, max_han: int = DEFAULT_MAX_HAN):
     }
 
 
+def print_single(result):
+    """单个标题的文本报告"""
+    print(f"标题：{result['title']}")
+    print(f"汉字数：{result['han_count']} / 建议≤{result['max_han']}")
+    print(f"含品牌词：{'是' if result['has_brand'] else '否'}")
+    if result["banned_hits"]:
+        print("禁用词命中：")
+        for h in result["banned_hits"]:
+            print(f"  - 「{h['word']}」@第{h['pos']+1}字")
+    if result["implication_hits"]:
+        print("暗示疗效风险：")
+        for ih in result["implication_hits"]:
+            print(f"  - 「{ih['match']}」（{ih['pattern']}）@第{ih['pos']+1}字")
+    if result["passed"]:
+        print("✅ 校验通过")
+    else:
+        print("❌ 存在问题：")
+        for p in result["problems"]:
+            print(f"  - {p}")
+
+
+def print_batch(results):
+    """批量校验的汇总表：一屏看全部，只展开有问题的"""
+    ok = [r for r in results if r["passed"]]
+    bad = [r for r in results if not r["passed"]]
+    print(f"批量校验 {len(results)} 条：通过 {len(ok)}｜不通过 {len(bad)}\n")
+    for i, r in enumerate(results, 1):
+        if r["passed"]:
+            print(f"{i:>2}. ✅ {r['han_count']}字  {r['title']}")
+    if bad:
+        print()
+        for i, r in enumerate(results, 1):
+            if not r["passed"]:
+                print(f"{i:>2}. ❌ {r['title']}")
+                for p in r["problems"]:
+                    print(f"      - {p}")
+
+
 def main():
     ap = argparse.ArgumentParser(description="京东消字号标题合规校验")
-    ap.add_argument("title", help="待校验标题；或用 - 从 stdin 读取")
+    ap.add_argument("titles", nargs="*", help="待校验标题（可多个）；或用 - 从 stdin 读取")
+    ap.add_argument("--file", help="从文件读取标题，每行一个（# 开头与空行忽略）")
     ap.add_argument("--json", action="store_true", help="输出 JSON")
     ap.add_argument("--max", type=int, default=DEFAULT_MAX_HAN, help="字符数上限")
     args = ap.parse_args()
 
-    if args.title == "-":
-        title = sys.stdin.read().strip()
-    else:
-        title = args.title.strip()
+    titles = list(args.titles)
 
-    if not title:
-        print("错误：标题为空", file=sys.stderr)
+    if args.file:
+        try:
+            with open(args.file, encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if line and not line.startswith("#"):
+                        titles.append(line)
+        except OSError as e:
+            print(f"错误：无法读取文件 {args.file}（{e}）", file=sys.stderr)
+            sys.exit(2)
+
+    if len(args.titles) == 1 and args.titles[0] == "-":
+        titles = [sys.stdin.read().strip()]
+
+    titles = [t.strip() for t in titles if t and t.strip()]
+
+    if not titles:
+        print("错误：标题为空（位置参数、--file 或 stdin 至少给一个）", file=sys.stderr)
         sys.exit(2)
 
-    result = check_title(title, args.max)
+    results = [check_title(t, args.max) for t in titles]
+    all_passed = all(r["passed"] for r in results)
 
     if args.json:
-        print(json.dumps(result, ensure_ascii=False, indent=2))
+        # 单条输出对象（兼容旧调用），多条输出数组
+        print(json.dumps(results[0] if len(results) == 1 else results,
+                         ensure_ascii=False, indent=2))
+    elif len(results) == 1:
+        print_single(results[0])
     else:
-        print(f"标题：{result['title']}")
-        print(f"汉字数：{result['han_count']} / 建议≤{result['max_han']}")
-        print(f"含品牌词：{'是' if result['has_brand'] else '否'}")
-        if result["banned_hits"]:
-            print("禁用词命中：")
-            for h in result["banned_hits"]:
-                print(f"  - 「{h['word']}」@第{h['pos']+1}字")
-        if result["implication_hits"]:
-            print("暗示疗效风险：")
-            for ih in result["implication_hits"]:
-                print(f"  - 「{ih['match']}」（{ih['pattern']}）@第{ih['pos']+1}字")
-        if result["passed"]:
-            print("✅ 校验通过")
-        else:
-            print("❌ 存在问题：")
-            for p in result["problems"]:
-                print(f"  - {p}")
+        print_batch(results)
 
-    sys.exit(0 if result["passed"] else 1)
+    sys.exit(0 if all_passed else 1)
 
 
 if __name__ == "__main__":
