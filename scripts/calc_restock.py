@@ -49,6 +49,9 @@ STOCKOUT_DAYS = 3   # 可用库存 < 日出库 × (lead + 3) → 断货风险
 SKEW_OVER = 1.5     # >1.5 → 偏积压（库存占比明显高于销量占比）
 SKEW_UNDER = 0.67   # <0.67 → 偏缺货
 
+# B 仓直拨保留天数：B 仓拨货后仍需保留下批采购到货前的全网周转
+TRANSFER_BUFFER_DAYS = 3
+
 # 京东仓大区映射（仓名包含关键词即归入；用于同大区调拨优先）
 DEFAULT_REGIONS = {
     "华北": ["北京", "天津", "德州", "石家庄", "太原", "济南", "青岛"],
@@ -133,6 +136,7 @@ def calc_row(row, cover, safety_days, lead, by_tier):
         "sku": sku,
         "warehouse": wh,
         "region": detect_region(wh),
+        "is_b": False,
         "out7": out7,
         "daily": round(daily, 2),
         "tier": tier,
@@ -144,6 +148,48 @@ def calc_row(row, cover, safety_days, lead, by_tier):
         "final_restock": qty,   # 调拨修正后的最终新补货量
         "flags": flags,
     }
+
+
+def calc_b_warehouse(rows, b_row, lead, lead_bc, safety_days):
+    """B 仓（中心/分拨仓）补货量：覆盖所有 C 仓未来需求
+
+    B仓目标库存 = Σ_i[ 日均_i × (L_B + L_BC + 覆盖天数_i) ] + B仓安全库存
+    B仓补货量   = max(0, B仓目标库存 − B仓可用 − 在途(供应商→B仓))
+
+    L_B  = 供应商→B仓提前期（--lead）
+    L_BC = B仓→C仓在途天数（--lead-bc）
+    B仓安全库存 = 全网日均 × safety_days（聚集持有，风险池效应）
+    """
+    c_rows = [r for r in rows if r is not b_row]
+    if not c_rows:
+        return None
+
+    total_daily = sum(r["daily"] for r in c_rows)
+    # 各 C 仓需求（含 B→C 在途 + 本仓覆盖）
+    demand = sum(r["daily"] * (lead + lead_bc + r["cover_days"]) for r in c_rows)
+    b_safety = total_daily * safety_days
+    b_target = demand + b_safety
+
+    raw = b_target - b_row["stock"] - b_row["intransit"]
+    b_restock = max(0, math.ceil(raw - 1e-9))
+
+    b_row.update({
+        "is_b": True,
+        "target": round(b_target, 1),
+        "restock": b_restock,
+        "final_restock": b_restock,
+        "c_demand": round(demand, 1),
+        "b_safety": round(b_safety, 1),
+        "total_daily": round(total_daily, 2),
+        "c_count": len(c_rows),
+        "flags": [],
+    })
+    # B 仓自身预警：压全链路 / 见底
+    if total_daily > 0 and b_row["stock"] > total_daily * SLOW_DAYS:
+        b_row["flags"].append(f"B仓滞销(库存>{SLOW_DAYS}天全网销量)-全链路压货")
+    if 0 < total_daily and b_row["stock"] < total_daily * (lead + STOCKOUT_DAYS):
+        b_row["flags"].append("B仓断供风险-所有C仓将一起断")
+    return b_row
 
 
 def analyze_skew(rows):
@@ -158,6 +204,9 @@ def analyze_skew(rows):
 
     out = []
     for sku, rs in by_sku.items():
+        rs = [r for r in rs if not r.get("is_b")]  # B 仓不参与偏仓检测（源头库存天然大）
+        if not rs:
+            continue
         total_stock = sum(r["stock"] for r in rs)
         total_sales = sum(r["out7"] for r in rs)
         if total_stock <= 0 or total_sales <= 0:
@@ -195,22 +244,23 @@ def match_transfers(rows, lead):
 
     transfers = []
     for sku, rs in by_sku.items():
-        # 供体：库存高于本仓目标库存（滞销可调出）
+        # 供体：库存高于本仓目标库存（可调出）；B 仓排最前（源头直拨最快）
         donors = []
         for r in rs:
-            avail = max(0.0, r["stock"] - r["target"])
-            if avail >= 1 and r["daily"] >= 0:  # 至少 1 件才值得调
-                donors.append({"row": r, "avail": avail})
-        # 受体：需要补货的仓
-        receivers = [r for r in rs if r["restock"] > 0]
+            if r.get("is_b"):
+                # B 仓可拨出量：保留下批采购到货前的全网周转（L_B + L_BC + 3 天），
+                # 其余可作为源头直拨；拨出的量会补回 B 仓采购量（见下方）
+                total_daily = r.get("total_daily") or 0
+                reserve = total_daily * (lead + TRANSFER_BUFFER_DAYS)
+                avail = max(0.0, r["stock"] - reserve)
+            else:
+                avail = max(0.0, r["stock"] - r["target"])
+            if avail >= 1:
+                donors.append({"row": r, "avail": avail, "is_b": r.get("is_b", False)})
+        # 受体：需要补货的 C 仓（B 仓是采购受体不是调拨受体，排除）
+        receivers = [r for r in rs if r["restock"] > 0 and not r.get("is_b")]
         if not donors or not receivers:
             continue
-
-        # 同大区优先：先给同大区供体-受体配对
-        def same_region_first(recv):
-            reg = recv["region"]
-            return [d for d in donors if d["row"]["region"] == reg], \
-                   [d for d in donors if d["row"]["region"] != reg]
 
         # 受体排序：断货紧急优先，再按缺口降序
         for recv in sorted(receivers,
@@ -218,10 +268,18 @@ def match_transfers(rows, lead):
                                           r["restock"]),
                            reverse=True):
             need = recv["restock"]
-            same, cross = same_region_first(recv)
-            # 候选供体：同大区按可调出降序，然后跨大区
-            for donor in sorted(same, key=lambda d: -d["avail"]) + \
-                         sorted(cross, key=lambda d: -d["avail"]):
+            reg = recv["region"]
+            # 供体优先级：B仓直拨 > 同大区C仓 > 跨大区C仓；组内按可调出降序
+            b_first = sorted([d for d in donors if d["is_b"]],
+                             key=lambda d: -d["avail"])
+            same = sorted([d for d in donors if not d["is_b"]
+                           and d["row"]["region"] == reg],
+                          key=lambda d: -d["avail"])
+            cross = sorted([d for d in donors if not d["is_b"]
+                            and d["row"]["region"] != reg],
+                           key=lambda d: -d["avail"])
+
+            for donor in b_first + same + cross:
                 if need <= 0:
                     break
                 if donor["avail"] < 1:
@@ -231,18 +289,24 @@ def match_transfers(rows, lead):
                     continue
                 d = donor["row"]
                 urgent = any("断货风险" in f for f in recv["flags"])
-                cross_region = d["region"] != recv["region"]
                 note = ""
-                if cross_region:
-                    note = f"跨大区（{d['region']}→{recv['region']}）在途2-4天"
-                if urgent and cross_region:
-                    note += "；⚠️断货紧急，调拨兜底同时必须下补货单"
-                elif urgent:
-                    note += "；断货紧急，优先安排"
+                if donor["is_b"]:
+                    note = "源头直拨，链路最快"
+                    if urgent:
+                        note += "；断货紧急，优先安排"
+                else:
+                    cross_region = d["region"] != reg
+                    if cross_region:
+                        note = f"跨大区（{d['region']}→{reg}）在途2-4天"
+                    if urgent and cross_region:
+                        note += "；⚠️断货紧急，调拨兜底同时必须下补货单"
+                    elif urgent:
+                        note += "；断货紧急，优先安排"
                 transfers.append({
                     "sku": sku,
                     "from_warehouse": d["warehouse"], "to_warehouse": recv["warehouse"],
                     "from_region": d["region"], "to_region": recv["region"],
+                    "via": "B仓直拨" if donor["is_b"] else "C仓互调",
                     "qty": qty,
                     "donor_avail": round(donor["avail"]),
                     "donor_stock": d["stock"], "donor_daily": d["daily"],
@@ -252,6 +316,9 @@ def match_transfers(rows, lead):
                 donor["avail"] -= qty
                 need -= qty
                 recv["final_restock"] = max(0, recv["final_restock"] - qty)
+                # B 仓出掉的货要补回 B 仓采购量（C 仓互调不影响 B 仓）
+                if donor["is_b"]:
+                    d["final_restock"] = d["final_restock"] + qty
     return transfers
 
 
@@ -262,26 +329,33 @@ def print_transfer_report(transfers, rows):
         return
 
     total_q = sum(t["qty"] for t in transfers)
-    print(f"\n仓间调拨建议（{len(transfers)} 笔，合计 {total_q} 件；走京麦调拨申请）：")
-    print(f"{'SKU':<16}{'从仓':<8}{'到仓':<8}{'量':>5}  依据")
-    print("-" * 88)
+    b_q = sum(t["qty"] for t in transfers if t.get("via") == "B仓直拨")
+    via_note = f"（其中 B 仓直拨 {b_q} 件）" if b_q else ""
+    print(f"\n仓间调拨建议（{len(transfers)} 笔，合计 {total_q} 件{via_note}）：")
+    print(f"{'SKU':<16}{'从仓':<8}{'到仓':<8}{'方式':<7}{'量':>5}  依据")
+    print("-" * 96)
     for t in transfers:
         basis = (f"{t['from_warehouse']}库存{t['donor_stock']:.0f}/日销"
                  f"{t['donor_daily']:.1f}可调{t['donor_avail']:.0f} → "
                  f"{t['to_warehouse']}需补{t['receiver_need']:.0f}/存"
                  f"{t['receiver_stock']:.0f}")
         print(f"{t['sku']:<16}{t['from_warehouse']:<8}{t['to_warehouse']:<8}"
-              f"{t['qty']:>5}  {basis}")
+              f"{t.get('via', 'C仓互调'):<7}{t['qty']:>5}  {basis}")
         if t["note"]:
-            print(f"{'':<32}└ {t['note']}")
+            print(f"{'':<44}└ {t['note']}")
 
     # 调拨后最终补货量（只列有变化的）
     changed = [r for r in rows if r["final_restock"] != r["restock"]]
     if changed:
         print("\n调拨后最终新补货量（调拨已覆盖部分不再下采购单）：")
         for r in changed:
-            print(f"  {r['sku']} / {r['warehouse']}：{r['restock']} → "
-                  f"{r['final_restock']}（调入 {r['restock'] - r['final_restock']}）")
+            if r.get("is_b"):
+                print(f"  {r['sku']} / {r['warehouse']}：{r['restock']} → "
+                      f"{r['final_restock']}（直拨出 {r['final_restock'] - r['restock']} "
+                      f"件，需补回采购）")
+            else:
+                print(f"  {r['sku']} / {r['warehouse']}：{r['restock']} → "
+                      f"{r['final_restock']}（调入 {r['restock'] - r['final_restock']}）")
 
 
 def print_skew_report(skews):
@@ -300,7 +374,28 @@ def print_skew_report(skews):
         print("  → 同一 SKU 同时出现积压仓与缺货仓 = 典型偏仓，优先调拨而非补货")
 
 
-def print_report(rows, transfers=None, skews=None):
+def print_b_warehouse_report(rows, lead, lead_bc):
+    """B 仓（中心仓）补货汇总：向供应商采购多少"""
+    b_rows = [r for r in rows if r.get("is_b")]
+    if not b_rows:
+        return
+    print(f"\nB 仓补货建议（向供应商/工厂下单；覆盖 {lead + lead_bc:.0f} 天链路 + "
+          f"C 仓覆盖天数）：")
+    for r in b_rows:
+        print(f"  {r['sku']} / {r['warehouse']}：全网日均 {r.get('total_daily', 0):.1f} 件，"
+              f"C 仓 {r.get('c_count', 0)} 个")
+        print(f"    目标库存 = C仓需求 {r.get('c_demand', 0):.0f} + B仓安全库存 "
+              f"{r.get('b_safety', 0):.0f} = {r['target']:.0f}")
+        print(f"    现有 = 可用 {r['stock']:.0f} + 在途 {r['intransit']:.0f}")
+        extra = ""
+        if r["final_restock"] > r["restock"]:
+            extra = (f"（其中 {r['final_restock'] - r['restock']} 件是直拨给 C 仓的补回量）")
+        print(f"    → **向供应商采购 {r['final_restock']} 件**{extra}")
+        for f in r["flags"]:
+            print(f"    ⚠️ {f}")
+
+
+def print_report(rows, transfers=None, skews=None, b_lead=None):
     """文本报告：明细 + 按仓汇总 + 预警"""
     total = sum(r["restock"] for r in rows)
     print(f"补货计算 {len(rows)} 行（SKU×仓），合计补货 {total:,.0f} 件\n")
@@ -337,6 +432,8 @@ def print_report(rows, transfers=None, skews=None):
         print_skew_report(skews)
     if transfers is not None:
         print_transfer_report(transfers, rows)
+    if b_lead:
+        print_b_warehouse_report(rows, b_lead[0], b_lead[1])
 
 
 def write_csv(rows, path):
@@ -362,6 +459,11 @@ def main():
                     help="按 A/B/C 层自动选覆盖天数（A=20/B=24/C=28），忽略 --cover")
     ap.add_argument("--no-transfer", action="store_true",
                     help="关闭偏仓调拨分析（默认开启）")
+    ap.add_argument("--b-warehouse", metavar="NAME",
+                    help="B 仓仓名（中心/分拨仓）。指定后启用两级供应链："
+                         "B 仓补货量按全网 C 仓需求计算，调拨时 B 仓直拨优先")
+    ap.add_argument("--lead-bc", type=float, default=2,
+                    help="B 仓→C 仓在途天数，默认 2")
     ap.add_argument("--out", help="导出明细 CSV 路径")
     ap.add_argument("--json", action="store_true", help="JSON 输出")
     args = ap.parse_args()
@@ -399,6 +501,19 @@ def main():
     rows = [calc_row(r, args.cover, args.safety_days, args.lead, args.cover_by_tier)
             for r in norm]
 
+    # B 仓（中心仓）模式：按全网 C 仓需求重算 B 仓补货量
+    b_row = None
+    if args.b_warehouse:
+        for r in rows:
+            if args.b_warehouse in r["warehouse"]:
+                b_row = r
+                break
+        if b_row is None:
+            print(f"警告：未找到 B 仓「{args.b_warehouse}」，按单层供应链计算",
+                  file=sys.stderr)
+        else:
+            calc_b_warehouse(rows, b_row, args.lead, args.lead_bc, args.safety_days)
+
     # 偏仓检测 + 调拨匹配（默认开启）
     skews, transfers = [], None
     if not args.no_transfer:
@@ -410,7 +525,8 @@ def main():
                           "transfers": transfers or []},
                          ensure_ascii=False, indent=2))
     else:
-        print_report(rows, transfers, skews)
+        print_report(rows, transfers, skews,
+                     b_lead=(args.lead, args.lead_bc) if b_row else None)
 
     if args.out:
         write_csv(rows, args.out)
