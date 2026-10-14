@@ -32,6 +32,8 @@ REQUIRED_FILES = [
     "references/products.md",
     "references/selection.md",
     "references/title_seo.md",
+    "references/main_image.md",
+    "references/detail_page.md",
     "references/promo_tools.md",
     "references/promo.md",
     "references/promo_roi_playbook.md",

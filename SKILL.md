@@ -99,22 +99,14 @@ agent_created: true
 4. 输出候选标题 + 埋词说明（覆盖哪些搜索词）+ 证据等级。
 5. 需要可直接复制成品 → `examples/title_samples.md`。
 
-## 模块二：主图 / 详情页文案
+## 模块二：主图 / 详情页优化（CTR × CVR 双杠杆）
 
-1. 读 `references/xiaohaohao_compliance.md` 与 `references/products.md`。
-2. **主图按 KV 角色分工**（不是五张平铺卖点），套 `assets/detail_page_template.md`：
-
-| 角色 | 任务 | 对应周郎中内容 |
-|---|---|---|
-| KV1 Hero | 一眼知道卖什么 + 为什么点进来 | 白底产品 + 规格 + 品牌 |
-| KV2 Benefit | 把参数翻译成用户收益 | 30g 大容量 / 用量更实在 |
-| KV3 Proof | 用真实证据建立信任 | 草本植物配方 / 成分特写 |
-| KV4 Scene | 让用户看到自己的使用场景 | 家庭常备 / 居家随身 / 成人适用 |
-| KV5 Spec·CTA | 规格、组合装与行动引导 | 多件装更划算 / 家庭囤货 |
-
-3. 详情页 10 个模块：模块名 + 文案 + 配图建议，每模块标注证据等级。
-4. 主图/详情页文案同样受禁用词约束（脚本仅校验标题，正文人工对照 compliance）。
-5. 需要成品 → `examples/detail_page_sample.md`。
+1. 读 `references/xiaohaohao_compliance.md`（视觉红线同样适用）与 `references/products.md`。
+2. **主图优化读 `references/main_image.md`**：技术规范（800×800 白底/≤500KB/主图视频 30s）、五张主图按转化任务分工、CTR 六手法、竞品对标 SOP、测图方法（一次只换一张，观察 3 天 CTR）、消字号视觉红线（禁前后对比图/病灶图/医疗符号）、常见扣分项。
+3. **详情页优化读 `references/detail_page.md`**：三生死指标（跳出率/停留/转化，前三屏定 50% 跳失）、10 模块按转化任务排序、FABE 卖点法则（一屏一卖点）、信任状层级、关联营销位置、移动端规范（750px/≤300KB/8–15 屏）、一致性与引用边界、10 项上线自查。
+4. **产出**：套 `assets/detail_page_template.md` 出结构，套 KV 角色分工出五张主图文案（每图画面 + ≤12 字文案），成品参照 `examples/detail_page_sample.md`。
+5. **顺序原则**：改版永远从首屏/首图开始，不从第 8 屏的资质证书开始。
+6. 主图/详情页文案受同一套禁用词约束（脚本仅校验标题文本，正文人工对照 compliance；也可跑 `check_title.py --max 100` 只看禁用词命中）。
 
 ## 模块三：推广投放（京东**所有**推广工具）
 
@@ -207,6 +199,8 @@ agent_created: true
 - `products.md` — 周郎中 SKU 卖点与定价（规范口径；实际在售以 account_context 为准）
 - `selection.md` — **选品与 SKU 结构**（四筛子、商智取数、多件装设计、提报采销流程）
 - `title_seo.md` — 标题 SEO 规则、关键词研究方法、按 SKU 词库
+- `main_image.md` — **主图优化 SOP**（CTR 导向：技术规范、五图分工、六手法、竞品对标、测图、消字号视觉红线）
+- `detail_page.md` — **详情页优化 SOP**（CVR 导向：三生死指标、10 模块转化任务、FABE、信任状、移动端规范、上线自查）
 - `promo_tools.md` — **京东全推广工具体系**（八大流量场：搜索/推荐/品牌/站外/内容/活动/私域/数据）
 - `promo.md` — 快车与投放细节（3 层词矩阵、海投/京速推/触点参数、DMP、否词、分时）
 - `promo_roi_playbook.md` — 提高投产比实操手册
