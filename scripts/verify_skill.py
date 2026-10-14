@@ -34,6 +34,7 @@ REQUIRED_FILES = [
     "references/title_seo.md",
     "references/main_image.md",
     "references/detail_page.md",
+    "references/ad_creative.md",
     "references/promo_tools.md",
     "references/promo.md",
     "references/promo_roi_playbook.md",
