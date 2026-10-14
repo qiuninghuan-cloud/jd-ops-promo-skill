@@ -38,6 +38,7 @@ REQUIRED_FILES = [
     "references/review_ops.md",
     "references/review_activity_data.md",
     "references/read_backend.md",
+    "references/supply_chain.md",
     "scripts/check_title.py",
     "scripts/verify_skill.py",
     "assets/title_template.md",
