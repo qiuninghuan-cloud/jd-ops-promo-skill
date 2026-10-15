@@ -287,6 +287,8 @@ python3 "$SKILL_DIR/scripts/calc_restock.py" restock.csv --out 补货结果.csv
 - 默认参数就是第 2 层进阶版：`--cover 20 --safety-days 5 --lead 7`
 - 输出：每行补货量（向上取整、不低于 0）+ 按仓汇总 + 滞销标记 + JSON/CSV
 - 分层覆盖天数可用 `--cover-by-tier` 自动按日出库分 A/B/C 层套不同天数
+- **输入纪律**：out7/stock/intransit 出现非数字（如"未知"）时脚本报出行号/SKU/仓/字段并**退出码 2 拒绝计算**——不把异常值静默当 0（那会产生错误采购量）；回导出表修正该单元格再跑
+- **多 SKU + B 仓**：`--b-warehouse B仓` 时每个 SKU 的 B 仓单独按本 SKU 的 C 仓需求计算，互不混算
 
 **输入 CSV 示例**：
 

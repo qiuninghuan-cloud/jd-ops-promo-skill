@@ -215,6 +215,31 @@
 
 ---
 
+## 用例 14：补货脚本边界（模块七，2026-10-15 修复回归）
+
+**输入**
+> 用 calc_restock.py 帮我算补货（多 SKU、B 仓模式、要导出 CSV）
+
+**期望行为**
+- 多 SKU + B 仓：每个 SKU 的 B 仓只收敛**本 SKU** 的 C 仓销量（不能把别的 SKU 算进第一个 B 仓）
+- 导出 CSV（`--out`）必须成功：B 仓行带 `is_b/c_demand/b_safety` 等额外字段，不能抛 ValueError
+- 异常数字（如库存填"未知"）：**报出具体行号、SKU、仓、字段名并退出码 2**，不静默按 0 计算
+- 偏仓调拨、调拨后补货修正、`--json` 结构在修复后与之前一致
+
+**退化信号**：B 仓全网日均等于所有 SKU 之和、导出 CSV 崩溃、异常值被当 0 悄悄算出一个采购量。
+
+**自动化验证**（可直接跑）
+```bash
+# 多SKU+B仓：A商品日均应只为A的C仓之和
+printf 'sku,warehouse,out7,stock,intransit\nA,B仓,0,900,0\nA,北京仓,70,120,60\nB,B仓,0,900,0\nB,北京仓,700,120,60\n' > /tmp/t14.csv
+python3 "$SKILL_DIR/scripts/calc_restock.py" /tmp/t14.csv --b-warehouse B仓 | grep "全网日均"
+# 异常值必须报错退出
+printf 'sku,warehouse,out7,stock,intransit\nA,北京仓,70,未知,0\n' > /tmp/t14b.csv
+python3 "$SKILL_DIR/scripts/calc_restock.py" /tmp/t14b.csv; echo "退出码:$?"   # 应为2
+```
+
+---
+
 ## 自动化部分（可直接跑）
 
 ```bash
