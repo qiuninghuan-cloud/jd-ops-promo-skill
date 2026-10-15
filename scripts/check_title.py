@@ -5,7 +5,7 @@
 
 功能：
   1. 检测标题中的禁用词（医疗功效、炎症/杀菌越界、病种词、修护舒缓、绝对化用语等）
-  2. 统计**总字符数**（汉字+数字+字母+符号），判断是否超过上限（默认 45 字符，京东标题上限口径）
+  2. 统计总字符数（含空格/标点），判断是否超过内部上限（默认 45）
   3. 检查品牌词「周郎中」是否出现
   4. 输出文本报告或 JSON（--json），供 skill 与 CI 调用
 
@@ -46,8 +46,8 @@ BANNED_WORDS = [
 # 品牌词（建议前置出现）
 BRAND = "周郎中"
 
-# 建议字符上限（京东标题按**总字符**计，含汉字/数字/字母/符号，约 30 汉字）
-DEFAULT_MAX_CHARS = 45
+# 内部总字符上限；保留旧变量名与 JSON 字段以兼容调用方。
+DEFAULT_MAX_HAN = 45
 
 # 暗示疗效的正则（即使不含上表精确词，命中以下模式也算违规）
 IMPLICATION_PATTERNS = [
@@ -62,7 +62,7 @@ def count_han(text: str) -> int:
     return len(re.findall(r"[一-鿿]", text))
 
 
-def check_title(title: str, max_chars: int = DEFAULT_MAX_CHARS):
+def check_title(title: str, max_han: int = DEFAULT_MAX_HAN):
     hits = []
     for w in BANNED_WORDS:
         if w in title:
@@ -71,8 +71,8 @@ def check_title(title: str, max_chars: int = DEFAULT_MAX_CHARS):
             hits.append({"word": w, "pos": idx})
 
     han = count_han(title)
-    total = len(title)               # 总字符数（汉字+数字+字母+符号）
-    over = total > max_chars         # 京东标题上限按总字符计
+    char_count = len(title)
+    over = char_count > max_han
     has_brand = BRAND in title
 
     # 暗示疗效正则检测
@@ -88,18 +88,19 @@ def check_title(title: str, max_chars: int = DEFAULT_MAX_CHARS):
     for ih in implication_hits:
         problems.append(f"暗示疗效风险「{ih['match']}」（{ih['pattern']}）@第{ih['pos']+1}字")
     if over:
-        problems.append(f"总字符数 {total} 超过上限 {max_chars}（其中汉字 {han}）")
+        problems.append(f"字符数 {char_count} 超过内部上限 {max_han}")
     if not has_brand:
         problems.append(f"未包含品牌词「{BRAND}」")
+    elif not title.startswith(BRAND):
+        problems.append(f"品牌词「{BRAND}」须前置")
 
     passed = len(problems) == 0
     return {
         "title": title,
         "passed": passed,
         "han_count": han,
-        "total_chars": total,
-        "max_chars": max_chars,
-        "max_han": max_chars,   # 兼容旧字段名
+        "char_count": char_count,
+        "max_han": max_han,
         "has_brand": has_brand,
         "banned_hits": hits,
         "implication_hits": implication_hits,
@@ -110,8 +111,7 @@ def check_title(title: str, max_chars: int = DEFAULT_MAX_CHARS):
 def print_single(result):
     """单个标题的文本报告"""
     print(f"标题：{result['title']}")
-    print(f"总字符数：{result['total_chars']} / 上限 {result['max_chars']}"
-          f"（含汉字 {result['han_count']}）")
+    print(f"字符数：{result['char_count']} / 内部上限≤{result['max_han']}（汉字 {result['han_count']}）")
     print(f"含品牌词：{'是' if result['has_brand'] else '否'}")
     if result["banned_hits"]:
         print("禁用词命中：")
@@ -136,7 +136,7 @@ def print_batch(results):
     print(f"批量校验 {len(results)} 条：通过 {len(ok)}｜不通过 {len(bad)}\n")
     for i, r in enumerate(results, 1):
         if r["passed"]:
-            print(f"{i:>2}. ✅ {r['han_count']}字  {r['title']}")
+            print(f"{i:>2}. ✅ {r['char_count']}字符  {r['title']}")
     if bad:
         print()
         for i, r in enumerate(results, 1):
@@ -151,9 +151,10 @@ def main():
     ap.add_argument("titles", nargs="*", help="待校验标题（可多个）；或用 - 从 stdin 读取")
     ap.add_argument("--file", help="从文件读取标题，每行一个（# 开头与空行忽略）")
     ap.add_argument("--json", action="store_true", help="输出 JSON")
-    ap.add_argument("--max", type=int, default=DEFAULT_MAX_CHARS,
-                    help="总字符数上限（含数字字母符号），默认 45")
+    ap.add_argument("--max", type=int, default=DEFAULT_MAX_HAN, help="字符数上限")
     args = ap.parse_args()
+    if args.max < 1:
+        ap.error("--max 必须为正整数")
 
     titles = list(args.titles)
 
@@ -169,7 +170,8 @@ def main():
             sys.exit(2)
 
     if len(args.titles) == 1 and args.titles[0] == "-":
-        titles = [sys.stdin.read().strip()]
+        titles = [line.strip() for line in sys.stdin if line.strip()
+                  and not line.lstrip().startswith("#")]
 
     titles = [t.strip() for t in titles if t and t.strip()]
 

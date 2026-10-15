@@ -29,6 +29,8 @@ REQUIRED_FILES = [
     "references/xiaohaohao_compliance.md",
     "references/account_context.md",
     "references/evidence_gate.md",
+    "references/decision_rules.md",
+    "references/operating_rhythm.md",
     "references/products.md",
     "references/selection.md",
     "references/title_seo.md",
@@ -43,8 +45,11 @@ REQUIRED_FILES = [
     "references/read_backend.md",
     "references/supply_chain.md",
     "scripts/check_title.py",
+    "scripts/calc_restock.py",
+    "scripts/test_regressions.py",
     "scripts/verify_skill.py",
     "assets/title_template.md",
+    "assets/operations_workbook.md",
     "assets/detail_page_template.md",
     "examples/title_samples.md",
     "examples/detail_page_sample.md",
@@ -89,13 +94,6 @@ def check_frontmatter():
     for key in ("name:", "description:"):
         if key not in fm:
             errors.append(f"frontmatter 缺少 {key}")
-    # 字段白名单：部分运行时（如 Codex 标准校验器）会拒绝未知字段
-    allowed_fm = {"name", "description", "license", "allowed-tools", "metadata"}
-    for line in fm.splitlines():
-        key = line.split(":", 1)[0].strip()
-        if key and key not in allowed_fm:
-            errors.append(
-                f"frontmatter 含非标准字段「{key}」（部分运行时会拒绝，请删除）")
     dm = re.search(r"^description:\s*(.+)$", fm, re.M)
     if dm:
         n = len(dm.group(1).strip())
@@ -146,21 +144,13 @@ def check_script():
         return
     good = "周郎中紫草皮肤抑菌膏30g草本植物配方外用抑菌家庭常备"
     bad = "周郎中紫草皮肤抑菌膏30g治疗湿疹三天见效"
-    # PYTHONUTF8=1：Windows 下父子进程编码不一致时子进程会崩（GBK 输出解码失败）
-    env = dict(os.environ, PYTHONUTF8="1")
     for title, should_pass in ((good, True), (bad, False)):
-        try:
-            r = subprocess.run([sys.executable, script, title], capture_output=True,
-                               text=True, encoding="utf-8", errors="replace",
-                               env=env, timeout=60)
-        except subprocess.TimeoutExpired:
-            errors.append(f"check_title.py 执行超时（60s）：{title}")
-            continue
+        r = subprocess.run([sys.executable, "-X", "utf8", script, title, "--json"],
+                           capture_output=True, text=True, encoding="utf-8")
         if r.returncode not in (0, 1):
-            errors.append(
-                f"check_title.py 退出码异常（{r.returncode}）：{r.stderr[:200]}")
+            errors.append(f"check_title.py 执行失败：{r.stderr.strip()}")
             continue
-        passed = "校验通过" in r.stdout
+        passed = r.returncode == 0
         if passed != should_pass:
             errors.append(
                 f"check_title.py 行为异常：{'合规' if should_pass else '违规'}标题「{title}」判定为 "

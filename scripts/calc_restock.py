@@ -73,17 +73,20 @@ def norm_key(k):
     return (k or "").strip().lower().replace(" ", "_").replace("-", "_")
 
 
-def to_num(v, default=0.0):
-    """宽松数字解析：去 ¥ 逗号空格，空值→default"""
+def to_num(v):
+    """数量必须为有限非负数，未知或空值不能当成零库存。"""
     if v is None:
-        return default
+        raise ValueError("缺少数量")
     s = str(v).strip().replace(",", "").replace("¥", "").replace("，", "")
     if not s:
-        return default
+        raise ValueError("数量为空")
     try:
-        return float(s)
+        value = float(s)
     except ValueError:
-        return default
+        raise ValueError(f"无效数量：{v!r}") from None
+    if not math.isfinite(value) or value < 0:
+        raise ValueError(f"数量必须为有限非负数：{v!r}")
+    return value
 
 
 def tier_of(daily):
@@ -107,9 +110,13 @@ def detect_region(warehouse, regions=None):
 def calc_row(row, cover, safety_days, lead, by_tier):
     sku = row.get("sku", "")
     wh = row.get("warehouse", "")
-    out7 = to_num(row.get("out7"))
-    stock = to_num(row.get("stock"))
-    intransit = to_num(row.get("intransit"))
+    quantities = {}
+    for field in ("out7", "stock", "intransit"):
+        try:
+            quantities[field] = to_num(row.get(field))
+        except ValueError as e:
+            raise ValueError(f"SKU {sku} / 仓库 {wh} / 字段 {field}：{e}") from e
+    out7, stock, intransit = (quantities[k] for k in ("out7", "stock", "intransit"))
 
     daily = out7 / 7.0
     tier = tier_of(daily)
@@ -160,10 +167,10 @@ def calc_b_warehouse(rows, b_row, lead, lead_bc, safety_days):
     L_BC = B仓→C仓在途天数（--lead-bc）
     B仓安全库存 = 全网日均 × safety_days（聚集持有，风险池效应）
     """
-    c_rows = [r for r in rows
-              if r is not b_row and r["sku"] == b_row["sku"]]
+    c_rows = [r for r in rows if r["sku"] == b_row["sku"] and not r.get("is_b")
+              and r is not b_row]
     if not c_rows:
-        return None
+        raise ValueError(f"B 仓 SKU {b_row['sku']} 缺少对应 C 仓需求")
 
     total_daily = sum(r["daily"] for r in c_rows)
     # 各 C 仓需求（含 B→C 在途 + 本仓覆盖）
@@ -183,6 +190,7 @@ def calc_b_warehouse(rows, b_row, lead, lead_bc, safety_days):
         "b_safety": round(b_safety, 1),
         "total_daily": round(total_daily, 2),
         "c_count": len(c_rows),
+        "lead_bc": lead_bc,
         "flags": [],
     })
     # B 仓自身预警：压全链路 / 见底
@@ -252,7 +260,7 @@ def match_transfers(rows, lead):
                 # B 仓可拨出量：保留下批采购到货前的全网周转（L_B + L_BC + 3 天），
                 # 其余可作为源头直拨；拨出的量会补回 B 仓采购量（见下方）
                 total_daily = r.get("total_daily") or 0
-                reserve = total_daily * (lead + TRANSFER_BUFFER_DAYS)
+                reserve = total_daily * (lead + r.get("lead_bc", 0) + TRANSFER_BUFFER_DAYS)
                 avail = max(0.0, r["stock"] - reserve)
             else:
                 avail = max(0.0, r["stock"] - r["target"])
@@ -438,15 +446,13 @@ def print_report(rows, transfers=None, skews=None, b_lead=None):
 
 
 def write_csv(rows, path):
-    cols = ["sku", "warehouse", "region", "is_b", "out7", "daily", "tier", "cover_days",
+    cols = ["sku", "warehouse", "region", "out7", "daily", "tier", "cover_days",
             "target", "stock", "intransit", "restock", "final_restock", "flags"]
     with open(path, "w", newline="", encoding="utf-8-sig") as f:
-        # extrasaction="ignore"：B 仓行带 c_demand/b_safety 等额外字段，不写入明细表
-        w = csv.DictWriter(f, fieldnames=cols, extrasaction="ignore")
+        w = csv.DictWriter(f, fieldnames=cols)
         w.writeheader()
         for r in rows:
-            r2 = dict(r)
-            r2["is_b"] = "B仓" if r.get("is_b") else ""
+            r2 = {key: r[key] for key in cols}
             r2["flags"] = "；".join(r["flags"])
             w.writerow(r2)
     print(f"\n已导出：{path}")
@@ -470,6 +476,10 @@ def main():
     ap.add_argument("--out", help="导出明细 CSV 路径")
     ap.add_argument("--json", action="store_true", help="JSON 输出")
     args = ap.parse_args()
+    for name in ("cover", "safety_days", "lead", "lead_bc"):
+        value = getattr(args, name)
+        if not math.isfinite(value) or value < 0:
+            ap.error(f"{name} 必须为有限非负数")
 
     try:
         with open(args.csv_file, encoding="utf-8-sig") as f:
@@ -501,38 +511,33 @@ def main():
               file=sys.stderr)
         sys.exit(2)
 
-    # 严格数字校验：异常值（如"未知"/文本）报出具体行号与字段并阻止计算，
-    # 不静默按 0 处理（那会产生错误采购量）。空值按 0（导出常见空格）。
-    for i, r in enumerate(norm, start=1):
-        for fld in ("out7", "stock", "intransit"):
-            v = r.get(fld)
-            if v is None or not str(v).strip():
-                continue
-            s = str(v).strip().replace(",", "").replace("¥", "").replace("，", "")
-            try:
-                float(s)
-            except ValueError:
-                print(f"错误：第 {i} 行（SKU {r.get('sku') or '?'} / "
-                      f"{r.get('warehouse') or '?'}）字段「{fld}」的值「{v}」不是数字。"
-                      f"请修正该单元格后重跑——本脚本不把异常值静默当 0。",
-                      file=sys.stderr)
-                sys.exit(2)
+    rows = []
+    seen = set()
+    for index, r in enumerate(norm, 2):
+        try:
+            key = (r["sku"].strip(), (r.get("warehouse") or "").strip())
+            if not all(key) or key in seen:
+                raise ValueError("SKU/仓库为空或 SKU×仓库重复")
+            seen.add(key)
+            r["sku"], r["warehouse"] = key
+            rows.append(calc_row(r, args.cover, args.safety_days, args.lead, args.cover_by_tier))
+        except ValueError as e:
+            ap.error(f"数据第 {index} 行：{e}")
 
-    rows = [calc_row(r, args.cover, args.safety_days, args.lead, args.cover_by_tier)
-            for r in norm]
-
-    # B 仓（中心仓）模式：按全网 C 仓需求重算 B 仓补货量（按 SKU 逐个算）
-    b_rows = []
+    # B 仓（中心仓）模式：按全网 C 仓需求重算 B 仓补货量
+    b_row = None
     if args.b_warehouse:
-        for r in rows:
-            if args.b_warehouse in r["warehouse"] and r not in b_rows:
-                b_rows.append(r)
+        b_rows = [r for r in rows if r["warehouse"] == args.b_warehouse]
         if not b_rows:
-            print(f"警告：未找到 B 仓「{args.b_warehouse}」，按单层供应链计算",
-                  file=sys.stderr)
-        else:
-            for b in b_rows:
-                calc_b_warehouse(rows, b, args.lead, args.lead_bc, args.safety_days)
+            ap.error(f"未找到 B 仓「{args.b_warehouse}」（仓名需精确匹配）")
+        for r in b_rows:
+            r["is_b"] = True
+        for r in b_rows:
+            try:
+                calc_b_warehouse(rows, r, args.lead, args.lead_bc, args.safety_days)
+            except ValueError as e:
+                ap.error(str(e))
+        b_row = b_rows[0]
 
     # 偏仓检测 + 调拨匹配（默认开启）
     skews, transfers = [], None
@@ -546,7 +551,7 @@ def main():
                          ensure_ascii=False, indent=2))
     else:
         print_report(rows, transfers, skews,
-                     b_lead=(args.lead, args.lead_bc) if b_rows else None)
+                     b_lead=(args.lead, args.lead_bc) if b_row else None)
 
     if args.out:
         write_csv(rows, args.out)
