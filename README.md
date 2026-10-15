@@ -1,95 +1,40 @@
 # jd-ops-promo
 
-京东运营与推广 Skill（周郎中消字号外用抑菌商品专属），符合 WorkBuddy / Claude Code / Codex 的 SKILL.md 规范。
+京东自营供应商全链路运营 Skill（品牌：周郎中，消字号外用抑菌）。
 
-## 覆盖能力
+## 目录结构
 
-| 模块 | 内容 |
-|---|---|
-| 标题与搜索优化 | 京东标题结构公式、关键词研究方法、按 SKU 词库、A/B 测试方法 |
-| 主图优化 | CTR 导向：技术规范、五图转化任务分工、六手法、竞品对标、一次一图测图、消字号视觉红线 |
-| 推广创意图 | CTR×CVR：三种创意形态、图上带字四手法、承接一致性诊断、广告法加严红线、测图纪律 |
-| 详情页优化 | CVR 导向：三生死指标、10 模块转化任务、FABE、信任状层级、移动端规范、上线自查 |
-| 推广投放 | 快车/海投/京速推/购物触点、3 层关键词矩阵、DMP 四层人群、否词、分时折扣 |
-| 提高投产 | 保本 ROI 测算、ROAS 四杠杆（CTR×CVR×AOV÷CPC）、CPC–客单价匹配检查、周度诊断表 |
-| 评价 / 活动 / 数据 | 评价回复话术、问大家 Q&A、活动筹备清单、周月报模板 |
+- `SKILL.md` — 主入口，七大模块
+- `references/` — 方法论文档（含 `calibers.md` 口径唯一来源）
+- `scripts/` — 可执行脚本（标题校验 / 补货计算 / 自检 / 数值金标准）
+- `tests/` — 回归测试套件
+- `assets/` — 模板（标题 / 详情页 / 缺数追问单）
+- `examples/` — 成品样例与回归用例
+- `agents/` — Codex 界面元数据
 
-## 机制（借鉴开源实践后新增）
-
-- **执行模式四选一**：diag 诊断 / ship 一次性交付 / review 审查改稿 / handoff 交付执行稿
-- **证据账本**：每条卖点标 ✅已确认 / 📄有依据 / ⚠️待补证 / 🚫禁止，不允许把待补证写成事实
-- **质量门 Pass/Fail**：不用"80/100"伪精确评分，按维度硬性阻断（标题靠脚本，其余靠清单）
-- **安全边界**：明确列出不会做的事（不编造检测报告/批准文号/销量/评价，不因"写猛一点"突破合规）
-- **置信度与数据缺口**：诊断结论必须标置信度，并列出还缺哪些报表
-- **平台规则两类处理**：长期方法论写入 references；禁词/审核等硬规则运行时核验官方最新来源
-
-> 设计思路参考开源项目 `feichanggege/ecommerce-visual-copywriting-skill`（Evidence Ledger / Pass-Fail 质量门），按消字号场景裁剪。
-
-## 合规约束（消字号）
-
-禁用词：治疗 / 消炎 / 抗菌 / 杀菌 / 湿疹 / 修护 / 舒缓 / 预防 / 最 / 一抹就好 等
-可用词：抑菌 / 清洁 / 护理 / 草本 / 植物配方 / 紫草 / 温和 / 外用 / 家庭常备
-
-标题上限 45 字符（约 30 汉字），品牌词前置。
-
-## 安装
+## 快速开始
 
 ```bash
-# WorkBuddy
-cp -r jd-ops-promo ~/.workbuddy/skills/
-# Claude Code
-cp -r jd-ops-promo ~/.claude/skills/
-# Codex（用软链，一处维护多处生效）
-ln -sfn ~/.workbuddy/skills/jd-ops-promo ~/.codex/skills/jd-ops-promo
-ln -sfn ~/.workbuddy/skills/jd-ops-promo ~/.agents/skills/jd-ops-promo
+python3 scripts/check_title.py "候选标题"
+python3 scripts/calc_restock.py restock.csv --b-warehouse B仓
+python3 scripts/verify_skill.py          # 发布前自检
+python3 scripts/test_calibers.py         # 数值金标准
+python3 tests/test_calc_restock.py       # 补货回归套件
 ```
 
-## 用法
+## 关键口径（唯一来源见 references/calibers.md）
 
-```bash
-# 标题合规校验
-python3 <skill目录>/scripts/check_title.py "周郎中紫草皮肤抑菌膏30g草本植物配方外用抑菌家庭常备"
+- 真实投产 = 后台投产 × 供货价率
+- 保本前台投产比 = 1 ÷ (供货价率 × 毛利率)
+- ROAS = CVR × 客单价 ÷ CPC（CPC 计费，不多乘 CTR）
 
-# 发布前自检（结构/引用/敏感信息/脚本行为）
-python3 <skill目录>/scripts/verify_skill.py
-```
+## 维护纪律
 
-在 Codex 里可用 `$jd-ops-promo` 显式调用；在 WorkBuddy / Claude Code 里描述任务即可自动匹配。
+1. 改口径先 Grep 再动手，逐处改完全局复查。
+2. 公式必须代入真实数字验证。
+3. 自检含内容级检查 + 反向注入测试（一个从来没失败过的检查等于没有检查）。
+4. Codex 二审是固定动作。
 
-## 目录
+## 版本
 
-```
-SKILL.md                          入口：身份前提、执行模式、安全边界、证据账本、质量门、七大模块
-references/                       合规词库、店铺现状快照(供应商口径)、证据与质量门、SKU卖点、
-                                  选品、SEO、主图优化、详情页优化、全推广工具体系、投放细节、
-                                  投产手册、评价运营、评价活动数据、后台实读SOP、供应链补货
-scripts/check_title.py            标题合规校验（支持批量）
-scripts/calc_restock.py           多仓补货量计算（含偏仓检测、仓间调拨、B仓两级模式）
-scripts/verify_skill.py           发布前自检
-assets/                           标题模板、详情页模板、图标
-examples/                         标题/详情页/推广计划/全渠道推广/投产诊断/选品立项/评价话术成品 + 回归测试用例
-agents/openai.yaml                Codex / ChatGPT 界面元数据与调用策略
-```
-
-## 七大模块
-
-1. 选品与 SKU 结构（四筛子、商智取数、多件装设计、提报采销）
-2. 标题与搜索优化（合规 + 45 字符 + 词库 + 脚本校验）
-3. 主图 / 详情页优化（主图 CTR SOP + 详情页 CVR SOP，双杠杆）
-4. 推广投放（京东**全推广工具**：搜索/推荐/品牌/站外/内容/活动/私域/数据八大流量场）
-5. 评价运营（四维目标、合规邀评、差评 SOP、问大家）
-6. 活动与数据复盘
-7. 供应链与补货（四层公式、偏仓治理、仓间调拨、B 仓两级供应链）
-
-## 身份前提
-
-我们是京东自营的**供应商**，不是店铺运营方。整单客单价、免运费凑单、满 X 元减、跨店活动一律不适用。
-
-## 回归测试
-
-修改 skill 后跑 `examples/test_prompts.md` 里的 12 个用例，重点验证：
-违规标题必须被拦、诊断必须带口径与置信度、投放方案必须有止损线、
-**选品不推荐下柜品**、**评价方案不含返现改评**、**供应商身份不得退化成店铺运营方**、
-**主图方案不含前后对比图/病灶图**、**详情页优化必须从首屏开始且一屏一卖点**。
-
-> 私有仓库：含品牌与运营数据，请勿公开分发。
+1.0.0（2026-10-15）

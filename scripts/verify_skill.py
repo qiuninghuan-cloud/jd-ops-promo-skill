@@ -9,11 +9,13 @@
   4. 敏感信息扫描（token / 密钥 / 密码 / 手机号 / 身份证 / 邮箱）
   5. 脚本行为回归：check_title.py（合规 PASS/违规 FAIL）+ calc_restock.py
      （多 SKU+B 仓不混算、异常值退出码 2）
-  6. **口径一致性**（2026-10-15 二轮 Codex 检测后加固）：
+  6. 口径一致性（2026-10-15 加固）：
      - ROAS 公式不得多乘 CTR；保本公式必须含供货价率（店铺口径须显式标注）
      - 80 点击 / CTR 1.2% 等阈值必须带「经验起始值」限定，不得写成平台通用规则
      - 证据账本不得把 products.md 列为 ✅ 来源（该表只算 📄，须逐 SKU 核实）
      - 关键内容存在性（供应商口径、执行闭环五要素、数据核对六查、下单前检查等）
+  7. 口径单一来源（2026-10-15）：供应商双口径公式只允许写在 references/calibers.md，
+     其余文件不得重复定义；并调用 test_calibers.py 做数值金标准断言（公式代入真实数字验证）。
      防的就是"改了 A 处忘了 B 处"——改任何口径前先跑本脚本，改完再跑一遍。
 
 用法：
@@ -45,12 +47,14 @@ REQUIRED_FILES = [
     "references/promo_tools.md",
     "references/promo.md",
     "references/promo_roi_playbook.md",
+    "references/calibers.md",
     "references/review_ops.md",
     "references/review_activity_data.md",
     "references/read_backend.md",
     "references/supply_chain.md",
     "scripts/check_title.py",
     "scripts/verify_skill.py",
+    "scripts/test_calibers.py",
     "assets/title_template.md",
     "assets/detail_page_template.md",
     "examples/title_samples.md",
@@ -60,6 +64,9 @@ REQUIRED_FILES = [
     "examples/review_samples.md",
     "examples/test_prompts.md",
     "agents/openai.yaml",
+    "README.md",
+    "assets/data_request_template.md",
+    "tests/test_calc_restock.py",
 ]
 
 # 敏感信息模式（命中即阻断）
@@ -84,6 +91,14 @@ FORBIDDEN_PATTERNS = [
     (r"ROAS\s*=\s*CTR", "ROAS 公式多乘 CTR（正确：ROAS = CVR × 客单价 ÷ CPC）",
      ("CPM", "已修正", "曾写成", "错误公式", "多乘")),
     (r"最大让利率\s*=\s*1\s*[−-]\s*\(", "让利公式错误（正确：最大让利率 = 毛利率 − 保底毛利率）", ()),
+]
+
+# ── 口径单一来源（2026-10-15）：供应商双口径公式只允许写在 calibers.md ──
+FORMULA_OWNER = {"references/calibers.md"}
+# 其余文件出现以下"赋值式"公式即为重复定义（references 与 SKILL.md 生效；examples 为代入样例，不查）
+DUP_FORMULA = [
+    (r"保本前台投产比\s*[=＝]\s*1", "保本前台投产比公式"),
+    (r"真实投产比\s*[=＝].*供货价率", "真实投产比（供应商口径）公式"),
 ]
 
 # 阈值类表述必须带「经验值」限定词（防把 80点击/CTR1.2% 写成平台通用规则）
@@ -125,11 +140,6 @@ def context_of(lines, i, pad=3):
         while hi + 1 < len(lines) and lines[hi + 1].lstrip().startswith("|"):
             hi += 1
     return "\n".join(lines[max(0, lo - pad):min(len(lines), hi + pad + 1)])
-
-
-def read(path):
-    with open(path, "r", encoding="utf-8") as f:
-        return f.read()
 
 
 def check_frontmatter():
@@ -247,6 +257,13 @@ def check_caliber():
             for pat, label, exempt in FORBIDDEN_PATTERNS:
                 if re.search(pat, line) and not any(k in line for k in exempt):
                     errors.append(f"{rel}:{i+1} {label}")
+            # ①b 口径单一来源：供应商双口径公式只允许出现在 calibers.md
+            if (rel == "SKILL.md" or rel.startswith("references/")) and rel not in FORMULA_OWNER:
+                for pat, label in DUP_FORMULA:
+                    if re.search(pat, line):
+                        errors.append(
+                            f"{rel}:{i+1} 重复定义{label}——口径单一来源：应只写在 "
+                            "references/calibers.md，其余文件改为引用")
             # ② 保本公式必须含供货价率；店铺口径须显式标注（只认紧邻 1 行，防相邻行"免罪"）
             if ("保本" in line and "毛利率" in line and "÷" in line
                     and "供货价率" not in line):
@@ -324,6 +341,72 @@ def check_restock_script():
             errors.append("calc_restock.py 异常值报错未指明出错值（应报出行号/SKU/仓/字段）")
 
 
+def check_calibers_numeric():
+    """调用 test_calibers.py 数值金标准（公式代入真实数字验证，防公式被改错）。"""
+    script = os.path.join(SKILL_DIR, "scripts", "test_calibers.py")
+    if not os.path.exists(script):
+        return
+    env = dict(os.environ, PYTHONUTF8="1")
+    try:
+        r = subprocess.run([sys.executable, script, SKILL_DIR], capture_output=True,
+                           text=True, encoding="utf-8", errors="replace",
+                           env=env, timeout=60)
+    except subprocess.TimeoutExpired:
+        errors.append("test_calibers.py 执行超时（60s）")
+        return
+    if r.returncode != 0:
+        errors.append(f"口径数值金标准测试未通过：{(r.stdout or r.stderr).strip()[:300]}")
+
+
+def check_markdown_fences():
+    """Markdown 代码围栏必须成对（防大段替换后遗留悬空 ```）。"""
+    for rel in ["SKILL.md"] + list(iter_content_files()):
+        p = os.path.join(SKILL_DIR, rel)
+        if not os.path.exists(p):
+            continue
+        n = sum(1 for ln in read(p).splitlines() if ln.lstrip().startswith("```"))
+        if n % 2 != 0:
+            errors.append(f"{rel} 代码围栏 ``` 未配对（共 {n} 个）——疑似编辑残留悬空围栏")
+
+
+def check_snapshot_age(max_days=7):
+    """快照时效：account_context.md 的快照日期距今 > max_days 天则 WARN。"""
+    import datetime
+    p = os.path.join(SKILL_DIR, "references", "account_context.md")
+    if not os.path.exists(p):
+        return
+    m = re.search(r"快照日期\**\s*[:：]\s*(\d{4})-(\d{2})-(\d{2})", read(p))
+    if not m:
+        warns.append("account_context.md 未找到快照日期（YYYY-MM-DD），无法判断时效")
+        return
+    try:
+        snap = datetime.date(int(m.group(1)), int(m.group(2)), int(m.group(3)))
+    except ValueError:
+        return
+    age = (datetime.date.today() - snap).days
+    if age > max_days:
+        warns.append(
+            f"account_context.md 快照已 {age} 天（> {max_days} 天）——商品价格/状态/推广数据"
+            "可能过期，做投产决策前务必重读当日京准通与京麦后台")
+
+
+def check_restock_tests():
+    """调用 tests/test_calc_restock.py 正式回归套件（补货脚本行为）。"""
+    script = os.path.join(SKILL_DIR, "tests", "test_calc_restock.py")
+    if not os.path.exists(script):
+        return
+    env = dict(os.environ, PYTHONUTF8="1")
+    try:
+        r = subprocess.run([sys.executable, script], capture_output=True,
+                            text=True, encoding="utf-8", errors="replace",
+                            env=env, timeout=120)
+    except subprocess.TimeoutExpired:
+        errors.append("tests/test_calc_restock.py 执行超时（120s）")
+        return
+    if r.returncode != 0:
+        errors.append(f"补货回归套件未通过：{(r.stdout or r.stderr).strip()[:300]}")
+
+
 def main():
     global SKILL_DIR
     SKILL_DIR = os.path.abspath(sys.argv[1] if len(sys.argv) > 1 else SKILL_DIR)
@@ -337,6 +420,10 @@ def main():
     check_restock_script()
     check_caliber()
     check_required_content()
+    check_calibers_numeric()
+    check_markdown_fences()
+    check_snapshot_age()
+    check_restock_tests()
 
     if warns:
         print("⚠️  提示：")
@@ -349,7 +436,7 @@ def main():
             print("   -", e)
         print(f"\nFAIL — {len(errors)} 项待修")
         return 1
-    print("✅ PASS — 结构完整、引用有效、无敏感信息、脚本行为正确、口径一致")
+    print("✅ PASS — 结构完整、引用有效、无敏感信息、脚本行为正确、口径一致（单一来源+数值金标准）")
     return 0
 
 
