@@ -15,6 +15,13 @@
   6. 偏仓调拨      积压仓→缺货仓生成调拨，且修正受体 final_restock
   7. CSV 导出      --out 落盘，含 final_restock 列
   8. JSON 输出     --json 可解析、结构完整
+  9. B 仓 C 仓提前期  B 仓模式下 C 仓必须用 L_BC（不是 L_B）
+ 10. B 仓压货判据    须用自身覆盖天数（L_B+L_BC+覆盖+安全），非固定 30 天
+ 11. B 仓断供判据    须含 L_BC（B→C 在途）
+ 12. B 仓可拨保留量  reserve 须含 L_BC
+
+第 9–12 项是 2026-10-16 修正的 4 处 B 仓口径缺陷的回归防线：
+这 4 处此前无任何检查覆盖，全部会静默影响最终采购量或产生误报/漏报。
 """
 import json
 import os
@@ -139,19 +146,106 @@ def case_json_shape():
           all(k in data for k in ("rows", "skews", "transfers")), list(data.keys()))
 
 
+def case_b_mode_c_lead():
+    """B 仓模式下 C 仓提前期必须是 L_BC（不是 L_B）——修正点 1。
+
+    C 仓的货由 B 仓拨给，提前期是 B→C 在途天数。误用 L_B 会把 C 仓补货量
+    算高 (L_B − L_BC) × 日均，并经「直拨补回」虚增最终采购量。
+    """
+    csv = ("sku,warehouse,out7,stock,intransit\n"
+           "K,B仓,0,900,0\nK,北京仓,70,120,60\n")
+    r = run(csv, "--b-warehouse", "B仓", "--lead", "7", "--lead-bc", "2",
+            "--cover", "30", "--safety-days", "5", "--json")
+    check("B模式C仓lead exit=0", r.returncode == 0, r.stderr[:200])
+    data = json.loads(r.stdout)
+    bj = [row for row in data["rows"] if "北京" in row["warehouse"]][0]
+    # daily=10 → target = 10×(L_BC 2 + 覆盖 30) + 安全 10×5 = 370
+    # 若误用 L_B=7 则为 420（多算 50 件）
+    check("B模式 C仓提前期用L_BC", abs(bj["target"] - 370) < 0.05, bj["target"])
+    check("B模式 C仓补货 190", bj["restock"] == 190, bj["restock"])
+
+
+def case_b_overstock_rule():
+    """B 仓压货判据须用自身覆盖天数（L_B+L_BC+覆盖+安全）——修正点 2。
+
+    B 仓目标库存本就设计成覆盖这么多天；用固定 30 天判据会导致
+    「按目标备满 → 必然误报全链路压货」。
+    """
+    base = ("sku,warehouse,out7,stock,intransit\n"
+            "K,B仓,0,{b},0\nK,北京仓,70,120,60\n")
+    args = ("--b-warehouse", "B仓", "--lead", "7", "--lead-bc", "2",
+            "--cover", "30", "--safety-days", "5", "--json")
+    # 全网日均 10；B仓目标 = 10×(7+2+30)+10×5 = 440；压货线 = 10×44 = 440
+    r = run(base.format(b=440), *args)
+    data = json.loads(r.stdout)
+    b = [row for row in data["rows"] if row.get("is_b")][0]
+    check("B仓压货 备满不误报",
+          not any("压货" in f for f in b["flags"]), b["flags"])
+    r2 = run(base.format(b=441), *args)
+    data2 = json.loads(r2.stdout)
+    b2 = [row for row in data2["rows"] if row.get("is_b")][0]
+    check("B仓压货 超限必报",
+          any("压货" in f for f in b2["flags"]), b2["flags"])
+
+
+def case_b_stockout_rule():
+    """B 仓断供判据必须含 L_BC（B→C 在途）——修正点 3。
+
+    判据：可用 < 全网日均 × (L_B + L_BC + 3)。漏 L_BC 会让
+    「介于 (L_B+3) 与 (L_B+L_BC+3) 之间」的真实断供风险漏报。
+    """
+    base = ("sku,warehouse,out7,stock,intransit\n"
+            "K,B仓,0,{b},0\nK,北京仓,70,120,60\n")
+    args = ("--b-warehouse", "B仓", "--lead", "7", "--lead-bc", "2",
+            "--cover", "30", "--safety-days", "5", "--json")
+    # 全网日均 10；断供线 = 10×(7+2+3) = 120
+    r = run(base.format(b=115), *args)
+    data = json.loads(r.stdout)
+    b = [row for row in data["rows"] if row.get("is_b")][0]
+    check("B仓断供 低于(L_B+L_BC+3)必报",
+          any("断供" in f for f in b["flags"]), b["flags"])
+    r2 = run(base.format(b=130), *args)
+    data2 = json.loads(r2.stdout)
+    b2 = [row for row in data2["rows"] if row.get("is_b")][0]
+    check("B仓断供 高于(L_B+L_BC+3)不报",
+          not any("断供" in f for f in b2["flags"]), b2["flags"])
+
+
+def case_b_reserve_rule():
+    """B 仓可拨保留量 reserve 须含 L_BC——修正点 4。
+
+    reserve = 全网日均 × (L_B + L_BC + 3)。漏 L_BC 会把 B 仓多掏空
+    L_BC 天的周转量，下次全链路断供。
+    """
+    csv = ("sku,warehouse,out7,stock,intransit\n"
+           "K,B仓,0,900,0\nK,北京仓,70,120,60\n")
+    r = run(csv, "--b-warehouse", "B仓", "--lead", "7", "--lead-bc", "2",
+            "--cover", "30", "--safety-days", "5", "--json")
+    check("B仓保留量 exit=0", r.returncode == 0, r.stderr[:200])
+    data = json.loads(r.stdout)
+    tr = data["transfers"]
+    check("B仓保留量 有直拨", any(t.get("via") == "B仓直拨" for t in tr), tr)
+    if tr:
+        # reserve = 10×(7+2+3) = 120 → 可拨 900−120 = 780
+        # 若漏 L_BC：reserve=100 → 可拨 800（会多拨 20 件）
+        check("B仓保留量 含L_BC", tr[0]["donor_avail"] == 780, tr[0]["donor_avail"])
+
+
 def main():
     if not os.path.isfile(SCRIPT):
         print(f"找不到脚本：{SCRIPT}")
         return 1
     for fn in (case_basic, case_multi_b, case_bad_value, case_missing_col,
-               case_zero_out, case_transfer, case_csv_out, case_json_shape):
+               case_zero_out, case_transfer, case_csv_out, case_json_shape,
+               case_b_mode_c_lead, case_b_overstock_rule,
+               case_b_stockout_rule, case_b_reserve_rule):
         fn()
     if fails:
         print(f"calc_restock 测试 FAIL（{len(fails)} 项）：")
         for f in fails:
             print("  - " + f)
         return 1
-    print("calc_restock 测试 PASS（8 组用例）")
+    print("calc_restock 测试 PASS（12 组用例）")
     return 0
 
 

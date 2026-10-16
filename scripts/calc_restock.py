@@ -186,9 +186,17 @@ def calc_b_warehouse(rows, b_row, lead, lead_bc, safety_days):
         "flags": [],
     })
     # B 仓自身预警：压全链路 / 见底
-    if total_daily > 0 and b_row["stock"] > total_daily * SLOW_DAYS:
-        b_row["flags"].append(f"B仓滞销(库存>{SLOW_DAYS}天全网销量)-全链路压货")
-    if 0 < total_daily and b_row["stock"] < total_daily * (lead + STOCKOUT_DAYS):
+    # 压货判据必须用 B 仓自身的覆盖天数（L_B + L_BC + C仓覆盖 + 安全库存），
+    # 不能用单层模式的固定 30 天——否则 B 仓按目标库存备满就必然误报"全链路压货"。
+    max_cover = max((r.get("cover_days") or 0) for r in c_rows) if c_rows else 0
+    b_limit_days = lead + lead_bc + max_cover + safety_days
+    if total_daily > 0 and b_row["stock"] > total_daily * b_limit_days:
+        b_row["flags"].append(
+            f"B仓压货(库存>{b_limit_days:.0f}天全网销量"
+            f"=L_B+L_BC+覆盖+安全)-全链路滞销")
+    # B 仓断供 = 所有 C 仓一起断，判据必须含 L_BC（B→C 在途）——supply_chain.md 第五节
+    if 0 < total_daily and b_row["stock"] < total_daily * (
+            lead + lead_bc + STOCKOUT_DAYS):
         b_row["flags"].append("B仓断供风险-所有C仓将一起断")
     return b_row
 
@@ -232,7 +240,7 @@ def analyze_skew(rows):
     return out
 
 
-def match_transfers(rows, lead):
+def match_transfers(rows, lead, lead_bc=0):
     """仓间调拨匹配：同 SKU，滞销仓 → 缺货仓
 
     可调出量 = max(0, 可用库存 − 本仓目标库存)   # 调完仍保留本仓正常周转
@@ -250,9 +258,9 @@ def match_transfers(rows, lead):
         for r in rs:
             if r.get("is_b"):
                 # B 仓可拨出量：保留下批采购到货前的全网周转（L_B + L_BC + 3 天），
-                # 其余可作为源头直拨；拨出的量会补回 B 仓采购量（见下方）
+                # 其余才可作为源头直拨；拨出的量会补回 B 仓采购量（见下方）
                 total_daily = r.get("total_daily") or 0
-                reserve = total_daily * (lead + TRANSFER_BUFFER_DAYS)
+                reserve = total_daily * (lead + lead_bc + TRANSFER_BUFFER_DAYS)
                 avail = max(0.0, r["stock"] - reserve)
             else:
                 avail = max(0.0, r["stock"] - r["target"])
@@ -518,7 +526,13 @@ def main():
                       file=sys.stderr)
                 sys.exit(2)
 
-    rows = [calc_row(r, args.cover, args.safety_days, args.lead, args.cover_by_tier)
+    # B 仓两级模式下，C 仓的货由 B 仓拨给，提前期是 L_BC（B→C 在途），
+    # 不是 L_B（供应商→B）——口径见 references/calibers.md 第五节 / supply_chain.md 第一节。
+    # 用错会把 C 仓补货量算高 (L_B − L_BC) × 日均，并经「直拨补回」虚增最终采购量。
+    b_mode = bool(args.b_warehouse) and any(
+        args.b_warehouse in (r.get("warehouse") or "") for r in norm)
+    c_lead = args.lead_bc if b_mode else args.lead
+    rows = [calc_row(r, args.cover, args.safety_days, c_lead, args.cover_by_tier)
             for r in norm]
 
     # B 仓（中心仓）模式：按全网 C 仓需求重算 B 仓补货量（按 SKU 逐个算）
@@ -538,7 +552,7 @@ def main():
     skews, transfers = [], None
     if not args.no_transfer:
         skews = analyze_skew(rows)
-        transfers = match_transfers(rows, args.lead)
+        transfers = match_transfers(rows, args.lead, args.lead_bc)
 
     if args.json:
         print(json.dumps({"rows": rows, "skews": skews,
