@@ -73,6 +73,24 @@ def norm_key(k):
     return (k or "").strip().lower().replace(" ", "_").replace("-", "_")
 
 
+# 中文表头 → 规范键（人工填表/中文导出都用中文列名，脚本内部仍用规范键）
+COL_ALIASES = {
+    "商品编码": "sku", "货号": "sku", "sku编码": "sku",
+    "仓库": "warehouse", "仓名": "warehouse", "配送仓": "warehouse",
+    "近7日出库": "out7", "近7日出库件数": "out7", "近7天出库": "out7",
+    "近七天出库": "out7", "7天出库": "out7", "近7日销量": "out7",
+    "可用库存": "stock", "库存": "stock", "可用": "stock",
+    "在途": "intransit", "采购未到货": "intransit", "采购在途": "intransit",
+    "内配在途": "intransit", "在途库存": "intransit",
+}
+
+
+def canon_key(k):
+    """表头 → 规范键：归一化后按中文别名映射（中英文表头都认）"""
+    n = norm_key(k)
+    return COL_ALIASES.get(n, n)
+
+
 def to_num(v, default=0.0):
     """宽松数字解析：去 ¥ 逗号空格，空值→default"""
     if v is None:
@@ -445,24 +463,34 @@ def print_report(rows, transfers=None, skews=None, b_lead=None):
         print_b_warehouse_report(rows, b_lead[0], b_lead[1])
 
 
-def write_csv(rows, path):
-    cols = ["sku", "warehouse", "region", "is_b", "out7", "daily", "tier", "cover_days",
-            "target", "stock", "intransit", "restock", "final_restock", "flags"]
+# 导出明细表的列（规范键 → 中文表头）
+CN_COLS = [("sku", "SKU"), ("warehouse", "仓库"), ("region", "大区"),
+           ("is_b", "类型"), ("out7", "近7日出库"), ("daily", "日销"),
+           ("tier", "销售分层"), ("cover_days", "覆盖天数"),
+           ("target", "目标库存"), ("stock", "可用库存"),
+           ("intransit", "在途"), ("restock", "补货量"),
+           ("final_restock", "最终补货量"), ("flags", "预警")]
+
+
+def write_csv(rows, path, cn=True):
+    cols = [c for c, _ in CN_COLS]
+    cn_map = dict(CN_COLS)
     with open(path, "w", newline="", encoding="utf-8-sig") as f:
-        # extrasaction="ignore"：B 仓行带 c_demand/b_safety 等额外字段，不写入明细表
-        w = csv.DictWriter(f, fieldnames=cols, extrasaction="ignore")
-        w.writeheader()
+        w = csv.writer(f)
+        w.writerow([cn_map[c] if cn else c for c in cols])
         for r in rows:
             r2 = dict(r)
-            r2["is_b"] = "B仓" if r.get("is_b") else ""
+            r2["is_b"] = "B仓" if r.get("is_b") else "C仓"
             r2["flags"] = "；".join(r["flags"])
-            w.writerow(r2)
+            w.writerow([r2.get(c, "") for c in cols])
     print(f"\n已导出：{path}")
 
 
 def main():
     ap = argparse.ArgumentParser(description="京东自营多仓补货量计算")
-    ap.add_argument("csv_file", help="输入 CSV（列：sku,warehouse,out7,stock,intransit）")
+    ap.add_argument("csv_file",
+                    help="输入 CSV（列：sku,warehouse,out7,stock,intransit；"
+                         "中文列名亦可：SKU/仓库/近7日出库/可用库存/在途）")
     ap.add_argument("--cover", type=float, default=20, help="覆盖天数，默认 20")
     ap.add_argument("--safety-days", type=float, default=5, help="安全库存天数，默认 5")
     ap.add_argument("--lead", type=float, default=7, help="供应提前期(天)，默认 7")
@@ -475,7 +503,9 @@ def main():
                          "B 仓补货量按全网 C 仓需求计算，调拨时 B 仓直拨优先")
     ap.add_argument("--lead-bc", type=float, default=2,
                     help="B 仓→C 仓在途天数，默认 2")
-    ap.add_argument("--out", help="导出明细 CSV 路径")
+    ap.add_argument("--out", help="导出明细 CSV 路径（默认中文表头）")
+    ap.add_argument("--en-header", action="store_true",
+                    help="导出 CSV 用英文表头（默认中文，供程序消费时用）")
     ap.add_argument("--json", action="store_true", help="JSON 输出")
     args = ap.parse_args()
 
@@ -490,10 +520,10 @@ def main():
         print("错误：CSV 无数据行", file=sys.stderr)
         sys.exit(2)
 
-    # 表头归一化
+    # 表头归一化（中英文列名都认）
     norm = []
     for rr in raw_rows:
-        d = {norm_key(k): v for k, v in rr.items() if k is not None}
+        d = {canon_key(k): v for k, v in rr.items() if k is not None}
         if not d.get("sku"):
             continue  # 跳过空行/无 SKU 行
         norm.append(d)
@@ -505,8 +535,10 @@ def main():
 
     missing = {"warehouse", "out7", "stock", "intransit"} - set(norm[0].keys())
     if missing:
-        print(f"错误：CSV 缺少列 {sorted(missing)}（需 sku,warehouse,out7,stock,intransit）",
-              file=sys.stderr)
+        cn = {"warehouse": "仓库", "out7": "近7日出库",
+              "stock": "可用库存", "intransit": "在途/采购未到货"}
+        print(f"错误：CSV 缺少列 {sorted(missing)}"
+              f"（可用英文列名或中文：{cn}）", file=sys.stderr)
         sys.exit(2)
 
     # 严格数字校验：异常值（如"未知"/文本）报出具体行号与字段并阻止计算，
@@ -563,7 +595,7 @@ def main():
                      b_lead=(args.lead, args.lead_bc) if b_rows else None)
 
     if args.out:
-        write_csv(rows, args.out)
+        write_csv(rows, args.out, cn=not args.en_header)
 
     sys.exit(0)
 

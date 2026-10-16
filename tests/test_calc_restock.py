@@ -19,6 +19,7 @@
  10. B 仓压货判据    须用自身覆盖天数（L_B+L_BC+覆盖+安全），非固定 30 天
  11. B 仓断供判据    须含 L_BC（B→C 在途）
  12. B 仓可拨保留量  reserve 须含 L_BC
+ 13. 中文表头       输入中文列名须被识别且与英文列名结果一致；导出默认中文表头
 
 第 9–12 项是 2026-10-16 修正的 4 处 B 仓口径缺陷的回归防线：
 这 4 处此前无任何检查覆盖，全部会静默影响最终采购量或产生误报/漏报。
@@ -135,7 +136,34 @@ def case_csv_out():
     if os.path.isfile(out):
         with open(out, encoding="utf-8-sig") as f:
             head = f.readline()
-        check("CSV导出 含 final_restock", "final_restock" in head, head.strip())
+        check("CSV导出 默认中文表头(最终补货量)", "最终补货量" in head, head.strip())
+        check("CSV导出 中文表头无英文字段", "final_restock" not in head, head.strip())
+    # --en-header 应回到英文表头（供程序消费）
+    out2 = os.path.join(tempfile.mkdtemp(), "res_en.csv")
+    r2 = run(csv, "--out", out2, "--en-header")
+    check("CSV导出 --en-header exit=0", r2.returncode == 0, r2.stderr[:200])
+    if os.path.isfile(out2):
+        with open(out2, encoding="utf-8-sig") as f:
+            head2 = f.readline()
+        check("CSV导出 --en-header 英文表头", "final_restock" in head2, head2.strip())
+
+
+def case_cn_headers():
+    """中文列名的输入表必须被正确识别，且与英文列名结果一致"""
+    cn = "SKU,仓库,近7日出库,可用库存,在途\nH1,北京仓,70,0,0\nH1,上海仓,35,55,0\n"
+    en = "sku,warehouse,out7,stock,intransit\nH1,北京仓,70,0,0\nH1,上海仓,35,55,0\n"
+    rc = run(cn, "--json")
+    re_ = run(en, "--json")
+    check("中文表头 exit=0", rc.returncode == 0, rc.stderr[:300])
+    check("中文表头 不报缺少列", "缺少列" not in rc.stderr, rc.stderr[:300])
+    try:
+        dc = json.loads(rc.stdout)
+        de = json.loads(re_.stdout)
+        same = [r["restock"] for r in dc["rows"]] == [r["restock"] for r in de["rows"]]
+        check("中文表头 与英文表头结果一致", same,
+              f'{ [r["restock"] for r in dc["rows"]] } vs { [r["restock"] for r in de["rows"]] }')
+    except Exception as e:
+        check("中文表头 与英文表头结果一致", False, repr(e))
 
 
 def case_json_shape():
@@ -236,8 +264,8 @@ def main():
         print(f"找不到脚本：{SCRIPT}")
         return 1
     for fn in (case_basic, case_multi_b, case_bad_value, case_missing_col,
-               case_zero_out, case_transfer, case_csv_out, case_json_shape,
-               case_b_mode_c_lead, case_b_overstock_rule,
+               case_zero_out, case_transfer, case_csv_out, case_cn_headers,
+               case_json_shape, case_b_mode_c_lead, case_b_overstock_rule,
                case_b_stockout_rule, case_b_reserve_rule):
         fn()
     if fails:
@@ -245,7 +273,7 @@ def main():
         for f in fails:
             print("  - " + f)
         return 1
-    print("calc_restock 测试 PASS（12 组用例）")
+    print("calc_restock 测试 PASS（13 组用例）")
     return 0
 
 
