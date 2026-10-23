@@ -38,6 +38,13 @@ REQUIRED_FILES = [
     "references/xiaohaohao_compliance.md",
     "references/account_context.md",
     "references/evidence_gate.md",
+    "references/operator_judgment.md",
+    "examples/operator_cases.md",
+    "references/business_workflows.md",
+    "references/contribution_tool.md",
+    "scripts/calc_supplier_contribution.py",
+    "tests/test_supplier_contribution.py",
+    "assets/contribution_input_template.json",
     "references/products.md",
     "references/selection.md",
     "references/title_seo.md",
@@ -90,7 +97,8 @@ CONTENT_SCAN_EXCLUDE = {"test_prompts.md"}
 FORBIDDEN_PATTERNS = [
     (r"ROAS\s*=\s*CTR", "ROAS 公式多乘 CTR（正确：ROAS = CVR × 客单价 ÷ CPC）",
      ("CPM", "已修正", "曾写成", "错误公式", "多乘")),
-    (r"最大让利率\s*=\s*1\s*[−-]\s*\(", "让利公式错误（正确：最大让利率 = 毛利率 − 保底毛利率）", ()),
+    (r"最大让利率\s*=\s*毛利率\s*[−-]\s*保底毛利率",
+     "不能用贡献率差值替代固定成本下的价格让利比例，见calibers.md", ()),
 ]
 
 # ── 口径单一来源（2026-10-15）：供应商双口径公式只允许写在 calibers.md ──
@@ -118,7 +126,7 @@ REQUIRED_CONTENT = {
     "references/promo_tools.md": ["执行闭环"],
     "references/evidence_gate.md": ["执行闭环", "products.md"],
     "references/products.md": ["核实状态"],
-    "examples/selection_sample.md": ["最大让利率 = 毛利率 − 保底毛利率"],
+    "examples/selection_sample.md": ["references/calibers.md", "37.5%"],
     "examples/test_prompts.md": ["用例 15"],
 }
 
@@ -424,6 +432,12 @@ def main():
     check_markdown_fences()
     check_snapshot_age()
     check_restock_tests()
+    contribution_test = os.path.join(SKILL_DIR, "tests", "test_supplier_contribution.py")
+    if os.path.isfile(contribution_test):
+        run = subprocess.run([sys.executable, "-B", "-X", "utf8", contribution_test],
+                             capture_output=True, text=True, encoding="utf-8", timeout=60)
+        if run.returncode != 0:
+            errors.append(f"贡献测算回归未通过：{run.stderr.strip()[:300]}")
 
     if warns:
         print("⚠️  提示：")

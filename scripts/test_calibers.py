@@ -50,6 +50,19 @@ def check_arithmetic():
     check("真实投产 2.20x65%", round(2.20 * 0.65, 2), 1.43)
     # 店铺口径上限仅供参考，不得当生死线
     check("店铺口径 1/50%", round(1 / 0.50, 2), 2.00)
+    # 固定单位成本50，原供货价100，目标贡献率20%；折后仍须覆盖目标贡献。
+    min_price = 50 / (1 - 0.20)
+    check("最低供货价", min_price, 62.5)
+    check("最大供货让利率", 1 - min_price / 100, 0.375)
+    check("折后贡献率", (min_price - 50) / min_price, 0.20)
+    # 固定样本下零成交概率，以及保留目标贡献后的广告承受额。
+    check("零成交概率", (1 - 0.02) ** 100, 0.1326195559, 1e-9)
+    upper = 1 - 0.05 ** (1 / 100)
+    check("零成交单侧上界", upper, 0.0295130496, 1e-9)
+    check("上界反代", (1 - upper) ** 100, 0.05, 1e-9)
+    available = 20 - 5
+    check("目标CPC", 0.04 * available, 0.60)
+    check("目标ROAS", 60 / available, 4.0)
 
 
 def check_reference_table():

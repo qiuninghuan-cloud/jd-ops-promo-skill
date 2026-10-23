@@ -1,0 +1,15 @@
+{
+  "amount_basis": "needs_reconciliation",
+  "sales_amount": null,
+  "supplier_revenue": null,
+  "product_cost": null,
+  "packaging_cost": null,
+  "logistics_cost": null,
+  "tax_cost": null,
+  "other_variable_cost": null,
+  "ad_spend": null,
+  "existing_platform_margin": null,
+  "eligible_ad_spend": null,
+  "margin_guarantee_rate": null,
+  "ad_credit_rate": null
+}
